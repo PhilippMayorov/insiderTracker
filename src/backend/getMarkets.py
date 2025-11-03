@@ -4,6 +4,8 @@ Fetch top 10 markets from PolyMarket API
 import requests
 from typing import List, Dict, Any
 
+from insiderDetection import is_insider_market 
+
 
 def get_top_markets(limit: int = 10) -> List[Dict[str, Any]]:
     """
@@ -39,6 +41,21 @@ def get_top_markets(limit: int = 10) -> List[Dict[str, Any]]:
     except requests.exceptions.RequestException as e:
         print(f"Error fetching markets: {e}")
         return []
+
+def is_insider_market(market: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Determine if a market is an insider trading market based on specific criteria.
+    
+    Args:
+        market: A dictionary containing market information.
+
+    """
+
+    
+
+
+
+
 
 
 def print_market_summary(markets: List[Dict[str, Any]]) -> None:
