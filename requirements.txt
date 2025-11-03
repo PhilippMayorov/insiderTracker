@@ -39,3 +39,6 @@ pydantic-settings==2.1.0
 
 # Utilities
 python-dateutil==2.8.2
+
+# Polymarket API:
+py-clob-client==0.1.0
