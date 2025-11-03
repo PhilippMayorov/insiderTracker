@@ -5,54 +5,100 @@ Identifies markets with potential for insider trading based on headlines
 import os
 import re
 from typing import List, Dict, Optional
-
-# Defer importing OpenAI and loading secrets until needed to avoid raising
-# at import time when the environment isn't configured (e.g. in tests).
+from openai import OpenAI
 from dotenv import load_dotenv
 
-# Load environment variables from .env (if present)
 load_dotenv()
 
-
-def get_openai_client() -> Optional[object]:
-    """Return an OpenAI client if OPENAI_API_KEY is available, otherwise None.
-
+def get_openai_client() -> Optional[OpenAI]:
+    """Return an OpenAI client if OPENAI_API_KEY is available and the openai
+    package is installed, otherwise None.
+=
     This avoids raising an exception on import when the key is not set and
     allows the module to fall back to a keyword-based heuristic.
     """
-    try:
-        from openai import OpenAI
-    except Exception:
-        # openai package not installed or not importable
-        return None
 
     api_key = os.getenv('OPENAI_API_KEY') or os.getenv('OPENAI_KEY')
+    
     if not api_key:
+        # Debug: Check if .env was loaded
+        if os.getenv('DEBUG'):
+            print("DEBUG: No OpenAI API key found in environment variables")
+            print(f"DEBUG: Checked OPENAI_API_KEY and OPENAI_KEY")
+            print(f"DEBUG: Current working directory: {os.getcwd()}")
         return None
 
-    return OpenAI(api_key=api_key)
+    try:
+        return OpenAI(api_key=api_key)
+    except Exception as e:
+        if os.getenv('DEBUG'):
+            print(f"DEBUG: Failed to instantiate OpenAI client: {e}")
+        return None
 
 
 # Keywords that suggest insider-sensitive events
+# These are organized by category with priority weighting
 INSIDER_KEYWORDS = {
-    'release': ['release', 'launch', 'unveil', 'debut', 'rollout'],
-    'announcement': ['announce', 'announcement', 'reveal', 'disclose'],
-    'regulatory': ['approve', 'approval', 'sec', 'fda', 'regulator', 'legislation', 
-                   'regulate', 'authorize', 'authorization'],
-    'political': ['election', 'elect', 'vote', 'ballot', 'referendum', 'senate', 
-                  'congress', 'parliament'],
-    'monetary': ['interest rate', 'fed', 'federal reserve', 'central bank', 
-                 'monetary policy', 'rate hike', 'rate cut'],
-    'corporate': ['merger', 'acquisition', 'buyout', 'takeover', 'ipo', 
-                  'earnings', 'quarterly report'],
-    'meeting': ['meeting', 'summit', 'conference', 'decision'],
+    # HIGHEST PRIORITY: Personal/Relationship (often known only to inner circle)
+    'personal_relationship': {
+        'keywords': ['divorce', 'pregnant', 'pregnancy', 'married', 'marry', 'engaged', 
+                    'engagement', 'baby', 'relationship', 'dating', 'breakup', 'break up',
+                    'split', 'expecting', 'cheating', 'affair'],
+        'priority': 'high'
+    },
+    
+    # HIGH PRIORITY: Release or announcement events (known in advance by insiders)
+    'release_announcement': {
+        'keywords': ['release', 'announce', 'announcement', 'launch', 'reveal', 
+                    'premiere', 'unveil', 'debut', 'tour', 'album', 'drop', 
+                    'event', 'concert', 'show', 'perform'],
+        'priority': 'high'
+    },
+    
+    # HIGH PRIORITY: Political/Government decisions (known to officials first)
+    'political_government': {
+        'keywords': ['election', 'resign', 'resignation', 'out as', 'step down',
+                    'appoint', 'appointment', 'vacancy', 'policy', 'law', 'act',
+                    'treaty', 'withdraw', 'sanction', 'pardon'],
+        'priority': 'high'
+    },
+    
+    # MEDIUM PRIORITY: Corporate events (insiders have early knowledge)
+    'corporate': {
+        'keywords': ['merger', 'acquisition', 'buyout', 'takeover', 'ipo', 
+                    'earnings', 'ceo', 'executive'],
+        'priority': 'medium'
+    },
+    
+    # MEDIUM PRIORITY: Regulatory decisions
+    'regulatory': {
+        'keywords': ['approve', 'approval', 'sec', 'fda', 'regulator', 'legislation', 
+                    'regulate', 'authorize', 'authorization'],
+        'priority': 'medium'
+    },
 }
 
-# Keywords to exclude (markets based on public information or speculation)
+# Keywords to EXCLUDE (markets based on public information or pure speculation)
+# These should be checked FIRST before checking insider keywords
 EXCLUDE_KEYWORDS = [
-    'price', 'reach', 'hit', 'above', 'below', 'bitcoin', 'eth', 'crypto',
-    'stock price', 'market cap', 'weather', 'temperature', 'sports', 'game',
-    'win', 'championship', 'score', 'team'
+    # Monetary policy (public Fed announcements)
+    'rate cut', 'rate hike', 'interest rate', 'fed rate', 'federal reserve',
+    'central bank', 'monetary policy',
+    
+    # Asset prices (pure speculation)
+    'price', 'reach', 'hit', 'above', 'below', '$', 
+    'bitcoin', 'btc', 'eth', 'ethereum', 'crypto', 'cryptocurrency',
+    'stock price', 'market cap', 'gold', 'silver', 'value',
+    
+    # Sports (outcomes not insider-knowable)
+    'sports', 'game', 'match', 'win', 'lose', 'championship', 
+    'score', 'team', 'player', 'nfl', 'nba', 'mlb', 'fifa',
+    
+    # Weather/Natural events
+    'weather', 'temperature', 'rain', 'snow', 'storm', 'hurricane',
+    
+    # Public box office / verifiable metrics
+    'box office', 'gross', 'opening weekend',
 ]
 
 
@@ -65,7 +111,8 @@ def is_insider_market(markets: List[Dict]) -> List[Dict]:
         markets: List of market dictionaries, each containing at least a 'headline' key
         
     Returns:
-        List of market dictionaries flagged as potentially insider-sensitive
+        List of market dictionaries flagged as potentially insider-sensitive,
+        with an added 'insider_score' field (0.0-1.0)
     """
     flagged_markets = []
     
@@ -73,7 +120,10 @@ def is_insider_market(markets: List[Dict]) -> List[Dict]:
         headline = market.get('headline') or market.get('question') or market.get('title', '')
         
         if headline and is_potentially_insider_headline(headline):
-            flagged_markets.append(market)
+            # Create a copy of the market dict and add the insider score
+            flagged_market = market.copy()
+            flagged_market['insider_score'] = insider_score(headline)
+            flagged_markets.append(flagged_market)
     
     return flagged_markets
 
@@ -83,14 +133,21 @@ def is_potentially_insider_headline(headline: str) -> bool:
     Determine whether a market headline could be influenced by insider knowledge
     using rule-based and OpenAI-based logic.
     
-    Criteria for Insider-Potential:
-    ✅ Release or announcement events
-    ✅ Political or regulatory decisions
-    ✅ Privileged information events
+    Criteria for Insider-Potential (HIGH PRIORITY):
+    ✅ Personal/Relationship events (divorce, pregnancy, marriage, dating)
+    ✅ Release or announcement events (product launches, tours, albums)
+    ✅ Political or government decisions (resignations, appointments, policy)
+    
+    Criteria for Insider-Potential (MEDIUM PRIORITY):
+    ✅ Corporate events (mergers, acquisitions, earnings)
+    ✅ Regulatory decisions (SEC, FDA approvals)
     
     ❌ Excluded:
-    - Asset price predictions
-    - Sports, weather, or publicly observable events
+    - Monetary policy (Fed rate decisions - public announcements)
+    - Asset price predictions (Bitcoin, stocks, gold)
+    - Sports outcomes
+    - Weather or natural events
+    - Publicly verifiable metrics (box office numbers)
     
     Args:
         headline: Market headline/question to evaluate
@@ -135,31 +192,82 @@ def _should_exclude_headline(headline_lower: str) -> bool:
 
 def _check_insider_keywords(headline_lower: str) -> bool | None:
     """
-    Check headline against insider keywords using heuristics.
+    Check headline against insider keywords using priority-based heuristics.
     
     Args:
         headline_lower: Lowercase headline text
         
     Returns:
-        True if insider keywords found, False if clearly not insider-related,
+        True if insider keywords found (especially high-priority ones),
+        False if clearly not insider-related,
         None if ambiguous (needs OpenAI check)
     """
-    matches = 0
+    high_priority_match = False
+    medium_priority_match = False
     
-    for category, keywords in INSIDER_KEYWORDS.items():
+    for category, data in INSIDER_KEYWORDS.items():
+        keywords = data['keywords']
+        priority = data['priority']
+        
         for keyword in keywords:
             if keyword in headline_lower:
-                matches += 1
-                # Strong indicators
-                if category in ['regulatory', 'monetary', 'corporate', 'announcement']:
+                if priority == 'high':
+                    # Personal relationships, releases, political events are strong signals
                     return True
+                elif priority == 'medium':
+                    medium_priority_match = True
     
-    # If we found some matches but not strong ones, it's ambiguous
-    if matches > 0:
-        return None
+    # If we found medium-priority matches, consider it insider-sensitive
+    if medium_priority_match:
+        return True
     
     # No matches found
     return False
+
+
+def insider_score(headline: str) -> float:
+    """
+    Return a score between 0.0 and 1.0 for insider risk intensity.
+    
+    Score ranges:
+    - 0.9-1.0: HIGH priority insider-sensitive (personal/relationship, major announcements)
+    - 0.6-0.8: MEDIUM priority insider-sensitive (corporate, regulatory)
+    - 0.0-0.3: Public information or excluded categories
+    
+    Args:
+        headline: Market headline/question to evaluate
+        
+    Returns:
+        Float score between 0.0 (no insider risk) and 1.0 (high insider risk)
+    """
+    if not headline:
+        return 0.0
+    
+    headline_lower = headline.lower()
+    
+    # Step 1: Check exclusions (score = 0.0)
+    if _should_exclude_headline(headline_lower):
+        return 0.0
+    
+    # Step 2: Check for high-priority keywords
+    for category, data in INSIDER_KEYWORDS.items():
+        keywords = data['keywords']
+        priority = data['priority']
+        
+        for keyword in keywords:
+            if keyword in headline_lower:
+                if priority == 'high':
+                    # Personal relationships, releases, political events
+                    if category == 'personal_relationship':
+                        return 1.0  # Highest confidence
+                    elif category in ['release_announcement', 'political_government']:
+                        return 0.95
+                elif priority == 'medium':
+                    # Corporate and regulatory events
+                    return 0.7
+    
+    # No insider keywords found
+    return 0.1  # Low default score (not definitively excluded, but no signals)
 
 
 def _check_with_openai(headline: str) -> bool:
@@ -177,7 +285,11 @@ def _check_with_openai(headline: str) -> bool:
         client = get_openai_client()
         if client is None:
             # No API key/config — fall back to conservative non-flagging
-            print("OpenAI API key not found; skipping AI-based classification.")
+            # Only print warning once per run
+            if not hasattr(_check_with_openai, '_warned'):
+                print("⚠️  OpenAI API key not found; using keyword-based classification only.")
+                print("   Set OPENAI_API_KEY in your .env file for improved accuracy.")
+                _check_with_openai._warned = True
             return False
 
         prompt = f"""You are an expert at identifying markets where insider trading could occur.
@@ -234,28 +346,57 @@ Respond with ONLY "YES" if this has insider potential, or "NO" if it does not.
 
 # Example usage and testing
 if __name__ == "__main__":
-    # Test cases
+    # Test cases covering all priority levels
     test_markets = [
-        {"headline": "Will the Federal Reserve raise interest rates in June 2025?"},
-        {"headline": "Will Bitcoin reach $100k by December 2025?"},
+        # HIGH PRIORITY: Personal/Relationship (should be flagged)
+        {"headline": "Hailey Bieber pregnant in 2025?"},
+        {"headline": "Jay-Z & Beyoncé divorce in 2025?"},
+        {"headline": "Nara & Lucky divorce in 2025?"},
+        {"headline": "Lana Del Rey divorce in 2025?"},
+        {"headline": "Taylor Swift engaged in 2025?"},
+        
+        # HIGH PRIORITY: Release/Announcement (should be flagged)
+        {"headline": "Britney Spears tour in 2025?"},
         {"headline": "Will the next iPhone be announced before October 2025?"},
+        {"headline": "Drake album release in 2025?"},
+        
+        # HIGH PRIORITY: Political/Government (should be flagged)
+        {"headline": "Will Biden resign before 2026?"},
+        {"headline": "Trump out as Republican nominee?"},
+        
+        # MEDIUM PRIORITY: Corporate/Regulatory (should be flagged)
         {"headline": "Will the SEC approve the Bitcoin ETF by June 2025?"},
-        {"headline": "Will it rain in New York tomorrow?"},
-        {"headline": "Will the Lakers win the championship this year?"},
         {"headline": "Will Apple acquire Disney before 2026?"},
         {"headline": "Will the FDA approve Alzheimer's drug X in Q1 2025?"},
+        
+        # EXCLUDED: Monetary policy (should NOT be flagged)
+        {"headline": "Will the Federal Reserve raise interest rates in June 2025?"},
+        {"headline": "Will 5 Fed rate cuts happen in 2025?"},
+        
+        # EXCLUDED: Asset prices (should NOT be flagged)
+        {"headline": "Will Bitcoin reach $100k by December 2025?"},
+        {"headline": "Will Bitcoin reach $150,000 by December 2025?"},
+        {"headline": "Will Ethereum hit $10k in 2025?"},
+        
+        # EXCLUDED: Sports (should NOT be flagged)
+        {"headline": "Will the Lakers win the championship this year?"},
+        
+        # EXCLUDED: Weather (should NOT be flagged)
+        {"headline": "Will it rain in New York tomorrow?"},
     ]
     
     print("Testing is_insider_market function:")
     print("=" * 80)
-    
+
     flagged = is_insider_market(test_markets)
     
     print(f"\nFound {len(flagged)} markets with insider potential:\n")
     for market in flagged:
-        print(f"✅ {market['headline']}")
+        score = market.get('insider_score', 0.0)
+        print(f"✅ [{score:.2f}] {market['headline']}")
     
     print(f"\n{len(test_markets) - len(flagged)} markets excluded:\n")
     for market in test_markets:
         if market not in flagged:
-            print(f"❌ {market['headline']}")
+            score = insider_score(market['headline'])
+            print(f"❌ [{score:.2f}] {market['headline']}")

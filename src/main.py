@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # Import the backend modules
 from backend.getEvents import get_top_events
-from backend.getMarkets import get_top_markets
+from backend.getMarkets import get_top_markets, get_insider_markets
 
 
 def main():
@@ -69,6 +69,123 @@ def main():
     
     with status_col4:
         st.metric("System Health", "🟢 OK")
+    
+    st.markdown("---")
+    
+    # Insider Trading Detection Section
+    st.subheader("🚨 Insider Trading Detection")
+    
+    st.write("""
+    This detector analyzes market headlines to identify those with potential for insider trading.
+    It looks for markets involving:
+    - Product releases and announcements
+    - Regulatory decisions (SEC, FDA approvals)
+    - Political/monetary policy events
+    - Corporate mergers and acquisitions
+    """)
+    
+    # Button to fetch and analyze markets for insider trading
+    if st.button("🔍 Detect Insider Trading Potential Markets", type="secondary", use_container_width=True, key="detect_insider"):
+        with st.spinner("Fetching and analyzing markets for insider trading potential..."):
+            insider_markets = get_insider_markets(limit=10, include_holders=True, holder_limit=10)
+            
+            if insider_markets:
+                st.success(f"🚨 Found {len(insider_markets)} markets with insider trading potential!")
+                st.markdown("---")
+                
+                # Display insider markets in an organized way
+                for idx, market in enumerate(insider_markets, 1):
+                    # Create an expander for each market
+                    with st.expander(f"🚨 #{idx} - {market.get('question', 'Unknown Market')}", expanded=(idx <= 2)):
+                        # Create columns for better layout
+                        info_col1, info_col2 = st.columns(2)
+                        
+                        with info_col1:
+                            st.metric("💰 Volume", f"${float(market.get('volume', 0)):,.2f}")
+                        
+                        with info_col2:
+                            st.metric("💧 Liquidity", f"${float(market.get('liquidity', 0)):,.2f}")
+                        
+                        # Highlight why this might be insider-sensitive
+                        st.warning("⚠️ **Potential Insider Risk**: This market involves events where privileged information may exist.")
+                        
+                        # Additional information
+                        st.markdown("**Details:**")
+                        st.write(f"🔗 **Slug:** `{market.get('market_slug', 'N/A')}`")
+                        
+                        # Outcome prices
+                        outcome_prices = market.get('outcomePrices', [])
+                        
+                        if outcome_prices and len(outcome_prices) >= 2:
+                            try:
+                                price_col1, price_col2 = st.columns(2)
+                                with price_col1:
+                                    yes_price = float(str(outcome_prices[0]))
+                                    st.metric("✅ Yes Price", f"${yes_price:.4f}")
+                                with price_col2:
+                                    no_price = float(str(outcome_prices[1]))
+                                    st.metric("❌ No Price", f"${no_price:.4f}")
+                            except (ValueError, TypeError, IndexError) as e:
+                                st.write(f"Outcome Prices: {outcome_prices}")
+                        
+                        # Additional market info
+                        if market.get('description'):
+                            st.write(f"📝 **Description:** {market.get('description')}")
+                        
+                        # Display end date if available
+                        if market.get('endDate'):
+                            st.write(f"⏰ **End Date:** {market.get('endDate')}")
+                        
+                        # Display event info if available
+                        if market.get('groupItemTitle'):
+                            st.write(f"📂 **Event:** {market.get('groupItemTitle')}")
+                        
+                        # Display insider score
+                        if 'insider_score' in market:
+                            insider_score = market['insider_score']
+                            st.metric("🎯 Insider Risk Score", f"{insider_score:.2f}", 
+                                     help="Score from 0.0 (low risk) to 1.0 (high risk)")
+                        
+                        # Display holder information if available
+                        if 'top_holders' in market and market.get('top_holders'):
+                            st.markdown("---")
+                            st.subheader("👥 Top Holders Analysis")
+                            
+                            total_holders = market.get('total_holders_count', 0)
+                            top_holders = market['top_holders']
+                            
+                            holder_col1, holder_col2 = st.columns(2)
+                            with holder_col1:
+                                st.metric("Total Holders", f"{total_holders:,}")
+                            with holder_col2:
+                                st.metric("Top Holders Shown", len(top_holders))
+                            
+                            # Display top holders in a table-like format
+                            st.markdown("**🐋 Top Holders:**")
+                            for h_idx, holder in enumerate(top_holders[:5], 1):
+                                wallet = holder.get('proxyWallet', 'N/A')
+                                amount = holder.get('amount', 0)
+                                outcome_idx = holder.get('outcomeIndex', 'N/A')
+                                pseudonym = holder.get('pseudonym', 'Anonymous')
+                                
+                                with st.container():
+                                    h_col1, h_col2, h_col3 = st.columns([3, 2, 1])
+                                    with h_col1:
+                                        st.write(f"**{h_idx}.** `{wallet[:16]}...`")
+                                        if pseudonym and pseudonym != 'Anonymous':
+                                            st.caption(f"👤 {pseudonym}")
+                                    with h_col2:
+                                        st.write(f"**Amount:** {amount:,}")
+                                    with h_col3:
+                                        outcome_label = "✅ Yes" if outcome_idx == 0 else "❌ No" if outcome_idx == 1 else "?"
+                                        st.write(outcome_label)
+                            
+                            if len(top_holders) > 5:
+                                st.caption(f"... and {len(top_holders) - 5} more holders shown in data")
+                        elif 'total_holders_count' in market:
+                            st.info(f"ℹ️ Total Holders: {market['total_holders_count']} (detailed data not loaded)")
+            else:
+                st.info("ℹ️ No markets with significant insider trading potential found in current top markets.")
     
     st.markdown("---")
     
@@ -164,7 +281,7 @@ def main():
                             
                             # Outcome prices
                             outcome_prices = market.get('outcomePrices', [])
-                            
+
                             if outcome_prices and len(outcome_prices) >= 2:
                                 try:
                                     price_col1, price_col2 = st.columns(2)
@@ -197,10 +314,11 @@ def main():
     st.subheader("🚀 Getting Started")    
     
     st.write("""
-    1. Click the **"Fetch Top 10 Events"** or **"Fetch Top 10 Markets"** buttons above
-    2. Expand any item to see detailed information
-    3. Monitor volume, liquidity, prices, and market activity
-    4. Use this data for anomaly detection and analysis
+    1. Click **"Detect Insider Trading Potential Markets"** to find markets with insider risk
+    2. Click **"Fetch Top 10 Events"** or **"Fetch Top 10 Markets"** for general data
+    3. Expand any item to see detailed information
+    4. Monitor volume, liquidity, prices, and market activity
+    5. Review flagged markets for unusual patterns
     """)
     
     # Footer
