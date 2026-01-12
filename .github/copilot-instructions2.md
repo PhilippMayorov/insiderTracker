@@ -167,3 +167,66 @@ HASHDIVE_API_KEY=your_api_key_here
 HASHDIVE_BASE_URL=https://hashdive.com/api
 HASHDIVE_RATE_LIMIT_QPS=1
 ```
+
+## 🚦 Rate Limits
+
+1 request per second
+
+60 requests per minute
+
+Each request consumes 1 credit
+
+Default: 1000 credits / month (PRO beta)
+
+The ingestion layer includes built-in throttling and retry logic.
+
+## 🔑 Key Endpoints Used
+
+/get_trades
+
+Used for:
+
+Wallet-level trade reconstruction
+
+Insider / timing detectors
+
+Coordination analysis
+
+Typical usage:
+
+Backfill historical trades
+
+Incremental polling every minute
+
+/get_positions
+
+Used for:
+
+Current exposure snapshots
+
+Pre-resolution accumulation detection
+
+/get_ohlcv
+
+Used for:
+
+Price & volume context
+
+Volatility normalization
+
+Timing asymmetry baselines
+
+/get_latest_whale_trades
+
+Used for:
+
+High-signal monitoring
+
+Fast-path whale alerts
+
+## 🧪 Example: Hashdive Ingestion Flow
+
+def ingest_wallet_trades(wallet):
+trades = hashdive.get_trades(wallet)
+write_bronze(trades)
+update_silver_features(trades)
