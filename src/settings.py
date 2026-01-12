@@ -1,43 +1,35 @@
 """Settings and environment configuration"""
 from pydantic_settings import BaseSettings
 from pydantic import Field
+from typing import List
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
-    # Database
-    postgres_host: str = Field(default="localhost", alias="POSTGRES_HOST")
-    postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
-    postgres_db: str = Field(default="polymarket_anomaly", alias="POSTGRES_DB")
-    postgres_user: str = Field(default="postgres", alias="POSTGRES_USER")
-    postgres_password: str = Field(default="changeme", alias="POSTGRES_PASSWORD")
-    
-    # MinIO
-    minio_endpoint: str = Field(default="localhost:9000", alias="MINIO_ENDPOINT")
-    minio_access_key: str = Field(default="minioadmin", alias="MINIO_ACCESS_KEY")
-    minio_secret_key: str = Field(default="minioadmin", alias="MINIO_SECRET_KEY")
-    minio_bucket: str = Field(default="polymarket-data", alias="MINIO_BUCKET")
-    
-    # API
-    api_host: str = Field(default="0.0.0.0", alias="API_HOST")
-    api_port: int = Field(default=8080, alias="API_PORT")
-    
-    # PolyMarket
-    polymarket_api_url: str = Field(
-        default="https://gamma-api.polymarket.com",
-        alias="POLYMARKET_API_URL"
-    )
-    polymarket_subgraph_url: str = Field(
-        default="https://api.thegraph.com/subgraphs/name/polymarket/polymarket",
-        alias="POLYMARKET_SUBGRAPH_URL"
+    # Hashdive API
+    hashdive_api_key: str = Field(default="", alias="HASHDIVE_API_KEY")
+    hashdive_api_url: str = Field(
+        default="https://api.hashdive.io",
+        alias="HASHDIVE_API_URL"
     )
     
-    # Polygon
-    polygon_rpc_url: str = Field(
-        default="https://polygon-rpc.com",
-        alias="POLYGON_RPC_URL"
-    )
+    # Email Configuration
+    smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_user: str = Field(default="", alias="SMTP_USER")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+    from_email: str = Field(default="", alias="FROM_EMAIL")
+    to_emails: List[str] = Field(default_factory=list, alias="TO_EMAILS")
+    
+    # Trade Tracking
+    trade_db_path: str = Field(default="data/trades.db", alias="TRADE_DB_PATH")
+    min_trade_size_usd: float = Field(default=100.0, alias="MIN_TRADE_SIZE_USD")
+    
+    # Alert Settings
+    batch_alerts: bool = Field(default=False, alias="BATCH_ALERTS")
+    batch_window_seconds: int = Field(default=300, alias="BATCH_WINDOW_SECONDS")
     
     # Logging
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
@@ -45,6 +37,14 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        
+        @staticmethod
+        def parse_env_var(field_name: str, raw_val: str):
+            """Parse environment variables, especially for lists"""
+            if field_name == 'TO_EMAILS':
+                # Parse comma-separated emails
+                return [email.strip() for email in raw_val.split(',') if email.strip()]
+            return raw_val
 
 
 # Global settings instance

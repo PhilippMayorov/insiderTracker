@@ -1,0 +1,22 @@
+# Wallet Configuration
+# List of PolyMarket wallet addresses to track
+
+wallets:
+  # Example wallet (replace with actual addresses)
+  - address: "0x1234567890123456789012345678901234567890"
+    name: "Wallet 1"
+    enabled: true
+
+  - address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+    name: "Wallet 2"
+    enabled: true
+
+# Polling configuration
+polling:
+  interval_seconds: 60 # How often to check for new trades
+  initial_lookback_hours: 24 # How far back to look on first run
+
+# Trade filtering (optional)
+filters:
+  min_trade_size_usd: 100 # Only alert on trades above this size
+  markets_to_exclude: [] # Market IDs to ignore

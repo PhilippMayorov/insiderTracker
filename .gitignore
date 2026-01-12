@@ -34,6 +34,11 @@ data/gold/*
 !data/silver/.gitkeep
 !data/gold/.gitkeep
 
+# Trade database
+data/trades.db
+data/*.db
+data/*.sqlite
+
 # Logs
 logs/
 *.log
