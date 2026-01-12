@@ -31,9 +31,9 @@ st.set_page_config(
 # Initialize session state
 if 'favorite_addresses' not in st.session_state:
     st.session_state.favorite_addresses = [
-        {"name": "frenchlaundry", "address": "0x1c3cdc2caa24eeb0434100f82ac32c2a260b1b01", "smart_score": 3.35},
-        {"name": "tom63901", "address": "0x36fb0ccfe40b9dae0922743d457e21dee59b494e", "smart_score": 0.04},
-        {"name": "merci", "address": "0x00f23f6a27a3e5a92da952da39526b17087947e9bc4f", "smart_score": 3.51},
+        {"name": "frenchlaundry", "address": "0x1c3cdc2caa24eeb0434100f82ac32c2a260b1b01", "main_market": "US Elections"},
+        {"name": "tom63901", "address": "0x36fb0ccfe40b9dae0922743d457e21dee59b494e", "main_market": "Crypto Markets"},
+        {"name": "merci", "address": "0x00f23f6a27a3e5a92da952da39526b17087947e9bc4f", "main_market": "Sports Betting"},
     ]
 
 if 'all_trades' not in st.session_state:
@@ -41,6 +41,9 @@ if 'all_trades' not in st.session_state:
 
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = None
+
+if 'show_add_form' not in st.session_state:
+    st.session_state.show_add_form = False
 
 
 def load_wallets_from_config():
@@ -116,30 +119,74 @@ def format_time_ago(timestamp):
 
 def main():
     """Main Streamlit application"""
-    
-    # Header with banner
-    st.markdown("### 🔎 New: Potential Insiders Dashboard")
-    st.markdown("Monitor suspicious traders and the markets where they may be active. 👉 [Explore Potential Insiders](#)")
-    st.markdown("---")
-    
+
     # Favorite Addresses Section
-    st.subheader("Favorite Addresses")
-    st.caption("You can edit the custom names by double clicking them.")
+    st.subheader("Tracked Insider Traders")
+    st.caption("You can edit names and markets by updating the fields. Click the delete button to remove a trader.")
+    
+    # Add new trader button
+    if st.button("➕ Add New Trader", type="secondary"):
+        st.session_state.show_add_form = not st.session_state.show_add_form
+    
+    # Add new trader form
+    if st.session_state.show_add_form:
+        with st.form("add_trader_form", clear_on_submit=True):
+            st.markdown("#### Add New Insider Trader")
+            
+            form_col1, form_col2, form_col3 = st.columns([2, 4, 2])
+            
+            with form_col1:
+                new_name = st.text_input("Name", placeholder="Enter trader name")
+            
+            with form_col2:
+                new_address = st.text_input("Wallet Address", placeholder="0x...")
+            
+            with form_col3:
+                new_market = st.text_input("Main Market", placeholder="e.g., US Elections")
+            
+            submit_col1, submit_col2 = st.columns([1, 5])
+            
+            with submit_col1:
+                submitted = st.form_submit_button("Add Trader", type="primary")
+            
+            with submit_col2:
+                cancel = st.form_submit_button("Cancel")
+            
+            if submitted and new_name and new_address:
+                st.session_state.favorite_addresses.append({
+                    "name": new_name,
+                    "address": new_address,
+                    "main_market": new_market or "Unknown"
+                })
+                st.session_state.show_add_form = False
+                st.success(f"✅ Added trader: {new_name}")
+                st.rerun()
+            
+            if cancel:
+                st.session_state.show_add_form = False
+                st.rerun()
+    
+    st.markdown("")
     
     # Display favorite addresses table
     if st.session_state.favorite_addresses:
-        # Create editable table
-        col1, col2, col3 = st.columns([2, 4, 1])
+        # Create editable table header
+        col1, col2, col3, col4 = st.columns([2, 4, 2, 0.8])
         
         with col1:
             st.markdown("**Custom Name**")
         with col2:
-            st.markdown("**User**")
+            st.markdown("**User Address**")
         with col3:
-            st.markdown("**Smart Score**")
+            st.markdown("**Main Market Traded**")
+        with col4:
+            st.markdown("**Actions**")
+        
+        # Display each trader with edit and delete options
+        traders_to_delete = []
         
         for i, fav in enumerate(st.session_state.favorite_addresses):
-            col1, col2, col3 = st.columns([2, 4, 1])
+            col1, col2, col3, col4 = st.columns([2, 4, 2, 0.8])
             
             with col1:
                 new_name = st.text_input(
@@ -151,79 +198,90 @@ def main():
                 st.session_state.favorite_addresses[i]['name'] = new_name
             
             with col2:
-                st.code(fav['address'], language=None)
+                new_address = st.text_input(
+                    "Address",
+                    value=fav['address'],
+                    key=f"address_{i}",
+                    label_visibility="collapsed"
+                )
+                st.session_state.favorite_addresses[i]['address'] = new_address
             
             with col3:
-                st.text(f"{fav['smart_score']:.2f}")
+                new_market = st.text_input(
+                    "Market",
+                    value=fav.get('main_market', 'Unknown'),
+                    key=f"market_{i}",
+                    label_visibility="collapsed"
+                )
+                st.session_state.favorite_addresses[i]['main_market'] = new_market
+            
+            with col4:
+                if st.button("🗑️", key=f"delete_{i}", help="Delete this trader"):
+                    traders_to_delete.append(i)
+        
+        # Delete traders after iteration
+        if traders_to_delete:
+            for idx in sorted(traders_to_delete, reverse=True):
+                deleted_trader = st.session_state.favorite_addresses.pop(idx)
+                st.success(f"🗑️ Deleted trader: {deleted_trader['name']}")
+            st.rerun()
+    
+    else:
+        st.info("No traders tracked yet. Click 'Add New Trader' to get started.")
     
     st.markdown("---")
     
     # Filters Section
+    st.markdown("### Filters")
+    
+    # Row 1: User and Purchase Side
     filter_col1, filter_col2 = st.columns(2)
     
     with filter_col1:
         filter_user = st.text_input(
-            "Filter by user (optional)",
-            placeholder="Paste the address here and press enter",
-            key="filter_user"
+            "Filter by User",
+            placeholder="Paste wallet address here and press enter",
+            key="filter_user",
+            help="Enter a wallet address to filter trades by a specific user"
         )
     
     with filter_col2:
         filter_side = st.selectbox(
-            "Filter by side",
+            "Filter by Purchase Side",
             options=["All", "Buy", "Sell"],
-            key="filter_side"
+            key="filter_side",
+            help="Filter trades by buy or sell side"
         )
     
-    # Price and amount filters
-    price_col1, price_col2 = st.columns(2)
+    # Row 2: Trade Size (Min to Max)
+    trade_size_col1, trade_size_col2 = st.columns(2)
     
-    with price_col1:
-        min_price = st.number_input(
-            "Min Price (USD)",
+    with trade_size_col1:
+        min_trade_size = st.number_input(
+            "Min Trade Size (USD)",
             min_value=0.0,
-            max_value=1.0,
             value=0.0,
-            step=0.01,
-            key="min_price"
+            step=100.0,
+            key="min_trade_size",
+            help="Minimum trade size in USD"
         )
     
-    with price_col2:
-        max_price = st.number_input(
-            "Max Price (USD)",
-            min_value=0.0,
-            max_value=1.0,
-            value=1.0,
-            step=0.01,
-            key="max_price"
-        )
-    
-    # USD amount filters
-    amount_col1, amount_col2 = st.columns(2)
-    
-    with amount_col1:
-        min_amount = st.number_input(
-            "Min USD amount",
-            min_value=0.0,
-            value=1.0,
-            step=1.0,
-            key="min_amount"
-        )
-    
-    with amount_col2:
-        max_amount = st.number_input(
-            "Max USD amount",
+    with trade_size_col2:
+        max_trade_size = st.number_input(
+            "Max Trade Size (USD)",
             min_value=0.0,
             value=1000000.0,
             step=100.0,
-            key="max_amount"
+            key="max_trade_size",
+            help="Maximum trade size in USD"
         )
     
-    # Market filter
-    filter_market = st.selectbox(
-        "Filter by market (1 matching your filters)",
-        options=["All"],
-        key="filter_market"
+    # Row 3: Market Name Filter
+    filter_market = st.text_input(
+        "Filter by Market Name",
+        placeholder="Enter market name or keywords",
+        key="filter_market",
+        help="Search for specific market names or keywords"
     )
     
     # Timezone info
@@ -269,18 +327,26 @@ def main():
         # Filter trades based on user inputs
         filtered_trades = st.session_state.all_trades
         
+        # Filter by user (wallet address)
         if filter_user:
             filtered_trades = [t for t in filtered_trades if filter_user.lower() in t.get('wallet_address', '').lower()]
         
+        # Filter by purchase side (Buy/Sell)
         if filter_side != "All":
             filtered_trades = [t for t in filtered_trades if t.get('side', '').lower() == filter_side.lower()]
         
-        # Apply price and amount filters
+        # Filter by trade size (USD amount)
         filtered_trades = [
             t for t in filtered_trades
-            if min_price <= t.get('price', 0) <= max_price
-            and min_amount <= t.get('value_usd', 0) <= max_amount
+            if min_trade_size <= t.get('value_usd', 0) <= max_trade_size
         ]
+        
+        # Filter by market name
+        if filter_market:
+            filtered_trades = [
+                t for t in filtered_trades 
+                if filter_market.lower() in t.get('market', '').lower()
+            ]
         
         # Create trades table
         if filtered_trades:
