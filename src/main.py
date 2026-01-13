@@ -8,15 +8,15 @@ from pathlib import Path
 import time
 import yaml
 
-from tracker.state import TradeState
-from integrations.hashdive import HashdiveClient
-from settings import settings
+# from tracker.state import TradeState
+# from integrations.hashdive import HashdiveClient
+# from settings import settings
 
 # Configure logging
-logging.basicConfig(
-    level=getattr(logging, settings.log_level),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# logging.basicConfig(
+#     level=getattr(logging, settings.log_level),
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# )
 
 logger = logging.getLogger(__name__)
 
