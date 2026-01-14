@@ -60,6 +60,7 @@ class TradeResponse(BaseModel):
     asset_id: Optional[str]
     market_name: Optional[str]
     side: Optional[str]
+    share_type: Optional[str]
     price: Optional[float]
     usd_amount: Optional[float]
     shares: Optional[float]
@@ -239,6 +240,8 @@ def get_trades(
     min_usd: Optional[float] = Query(None, description="Minimum USD amount"),
     max_usd: Optional[float] = Query(None, description="Maximum USD amount"),
     market: Optional[str] = Query(None, description="Filter by market name (partial match)"),
+    sort_by: Optional[str] = Query(None, description="Sort by column: timestamp, side, share_type, market, price, usd_amount, shares, wallet"),
+    sort_order: Optional[str] = Query("desc", description="Sort order: asc or desc"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=200, description="Items per page"),
     db: Session = Depends(get_db)
@@ -259,6 +262,8 @@ def get_trades(
         min_usd=min_usd,
         max_usd=max_usd,
         market=market,
+        sort_by=sort_by,
+        sort_order=sort_order,
         skip=skip,
         limit=page_size
     )

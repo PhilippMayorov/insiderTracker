@@ -28,6 +28,7 @@ class Trade(Base):
     asset_id = Column(String, nullable=True)
     market_name = Column(String, nullable=True, index=True)
     side = Column(String, nullable=True)  # buy / sell
+    share_type = Column(String, nullable=True)  # YES / NO
     price = Column(Float, nullable=True)
     usd_amount = Column(Float, nullable=True, index=True)
     shares = Column(Float, nullable=True)

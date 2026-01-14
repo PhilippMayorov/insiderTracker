@@ -96,11 +96,13 @@ def get_trades(
     min_usd: Optional[float] = None,
     max_usd: Optional[float] = None,
     market: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = "desc",
     skip: int = 0,
     limit: int = 50
 ) -> tuple[List[Trade], int]:
     """
-    Query trades with filters and pagination
+    Query trades with filters, sorting, and pagination
     Returns (trades, total_count)
     """
     query = db.query(Trade)
@@ -141,8 +143,30 @@ def get_trades(
     # Get total count
     total_count = query.count()
     
-    # Apply pagination and order
-    trades = query.order_by(Trade.timestamp.desc()).offset(skip).limit(limit).all()
+    # Apply sorting
+    sort_column_map = {
+        "timestamp": Trade.timestamp,
+        "side": Trade.side,
+        "share_type": Trade.share_type,
+        "market": Trade.market_name,
+        "price": Trade.price,
+        "usd_amount": Trade.usd_amount,
+        "shares": Trade.shares,
+        "wallet": Trade.wallet_address
+    }
+    
+    if sort_by and sort_by in sort_column_map:
+        sort_column = sort_column_map[sort_by]
+        if sort_order and sort_order.lower() == "asc":
+            query = query.order_by(sort_column.asc())
+        else:
+            query = query.order_by(sort_column.desc())
+    else:
+        # Default: sort by timestamp descending (most recent first)
+        query = query.order_by(Trade.timestamp.desc())
+    
+    # Apply pagination
+    trades = query.offset(skip).limit(limit).all()
     
     return trades, total_count
 
@@ -170,6 +194,7 @@ def create_trade(db: Session, trade_data: Dict[str, Any]) -> Optional[Trade]:
         asset_id=trade_data.get("asset_id"),
         market_name=trade_data.get("market_name"),
         side=trade_data.get("side"),
+        share_type=trade_data.get("share_type"),
         price=trade_data.get("price"),
         usd_amount=trade_data.get("usd_amount"),
         shares=trade_data.get("shares"),

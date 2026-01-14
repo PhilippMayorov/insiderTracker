@@ -114,11 +114,21 @@ def fetch_markets() -> List[str]:
 def format_time_ago(timestamp_str: str) -> str:
     """Format timestamp as 'time ago' string"""
     try:
-        # Parse ISO format timestamp
+        # Parse ISO format timestamp (assuming UTC)
         trade_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-        now = datetime.now(trade_time.tzinfo) if trade_time.tzinfo else datetime.now()
+        
+        # Remove timezone info to compare with current local time
+        if trade_time.tzinfo is not None:
+            trade_time = trade_time.replace(tzinfo=None)
+        
+        # Get current time as naive datetime
+        now = datetime.now()
         
         delta = now - trade_time
+        
+        # Handle negative delta (future timestamps)
+        if delta.total_seconds() < 0:
+            return "Just now"
         
         days = delta.days
         hours = delta.seconds // 3600
@@ -362,6 +372,40 @@ def main():
         help="Search for specific market names"
     )
     
+    # Row 4: Sort Controls
+    st.markdown("### Sort Options")
+    sort_col1, sort_col2 = st.columns(2)
+    
+    with sort_col1:
+        sort_by = st.selectbox(
+            "Sort By",
+            options=[
+                ("timestamp", "⏱️ Time (Most Recent)"),
+                ("usd_amount", "💵 Trade Size"),
+                ("price", "💰 Price"),
+                ("shares", "📊 Shares"),
+                ("side", "🔄 Side (Buy/Sell)"),
+                ("share_type", "✅ Share Type (YES/NO)"),
+                ("market", "📈 Market Name"),
+                ("wallet", "👤 Wallet Address")
+            ],
+            format_func=lambda x: x[1],
+            key="sort_by",
+            index=0
+        )
+    
+    with sort_col2:
+        sort_order = st.selectbox(
+            "Sort Order",
+            options=[
+                ("desc", "⬇️ Descending (High to Low / Recent to Old)"),
+                ("asc", "⬆️ Ascending (Low to High / Old to Recent)")
+            ],
+            format_func=lambda x: x[1],
+            key="sort_order",
+            index=0
+        )
+    
     # Timezone info
     st.info("All trade timestamps have been converted to your local time zone: America/Toronto (current local time: 2026-01-12 11:05:15).")
     
@@ -411,6 +455,10 @@ def main():
     if filter_market:
         filter_params["market"] = filter_market
     
+    # Add sorting parameters (always include them)
+    filter_params["sort_by"] = sort_by[0] if sort_by else "timestamp"
+    filter_params["sort_order"] = sort_order[0] if sort_order else "desc"
+    
     # Fetch trades
     trades_data = fetch_trades(filter_params)
     trades = trades_data.get("items", [])
@@ -420,19 +468,39 @@ def main():
     st.markdown(f"**Page {page_number} of {total_pages}** ({total_results} results)")
     
     if trades:
-        # Table header
-        header_cols = st.columns([1, 0.7, 3, 1, 0.8, 1.2, 2.5, 1.2, 1.5])
-        headers = ["Time Ago", "Side", "Market", "Trade Size", "Price", "Name", "User", "Traded Shares", "Timestamp"]
+        # Table header with tooltips
+        header_cols = st.columns([1.5, 0.7, 0.7, 3, 1, 0.8, 1.2, 2.5, 1.2])
+        headers = [
+            ("Timestamp", "Date and time of trade"),
+            ("Side", "Buy or Sell"),
+            ("Share Type", "YES or NO shares"),
+            ("Market", "Market name - hover for full text"),
+            ("Trade Size", "USD amount of trade"),
+            ("Price", "Price per share"),
+            ("Name", "Trader custom name"),
+            ("User", "Wallet address - hover for full address"),
+            ("Traded Shares", "Number of shares traded")
+        ]
         
-        for col, header in zip(header_cols, headers):
-            col.markdown(f"**{header}**")
+        for col, (header, tooltip) in zip(header_cols, headers):
+            col.markdown(f"**{header}**", help=tooltip)
         
         # Display trades
         for trade in trades:
-            trade_cols = st.columns([1, 0.7, 3, 1, 0.8, 1.2, 2.5, 1.2, 1.5])
+            trade_cols = st.columns([1.5, 0.7, 0.7, 3, 1, 0.8, 1.2, 2.5, 1.2])
             
-            # Time ago
-            trade_cols[0].text(format_time_ago(trade.get('timestamp', '')))
+            # Timestamp (show both formatted time and time ago)
+            timestamp_str = trade.get('timestamp', '')
+            if timestamp_str:
+                try:
+                    trade_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    formatted_time = trade_time.strftime('%Y-%m-%d %H:%M:%S')
+                    time_ago = format_time_ago(timestamp_str)
+                    trade_cols[0].markdown(f"{formatted_time}<br><small>{time_ago}</small>", unsafe_allow_html=True)
+                except Exception as e:
+                    trade_cols[0].text(timestamp_str)
+            else:
+                trade_cols[0].text("Unknown")
             
             # Side (Buy/Sell)
             side = trade.get('side', 'buy')
@@ -441,17 +509,32 @@ def main():
             else:
                 trade_cols[1].markdown("🔴 **Sell**")
             
-            # Market
+            # Share Type (YES/NO)
+            share_type = trade.get('share_type', 'YES')
+            if share_type and share_type.upper() == 'YES':
+                trade_cols[2].markdown("✅ **YES**")
+            else:
+                trade_cols[2].markdown("❌ **NO**")
+            
+            # Market (with tooltip for full text)
             market_name = trade.get('market_name', 'Unknown Market')
-            trade_cols[2].text(market_name[:50] + "..." if len(market_name) > 50 else market_name)
+            market_display = market_name[:50] + "..." if len(market_name) > 50 else market_name
+            if len(market_name) > 50:
+                # Use markdown with title attribute for hover tooltip
+                trade_cols[3].markdown(
+                    f'<div title="{market_name}">{market_display}</div>',
+                    unsafe_allow_html=True
+                )
+            else:
+                trade_cols[3].text(market_display)
             
             # Trade size
             trade_size = trade.get('usd_amount', 0) or 0
-            trade_cols[3].text(f"${trade_size:.2f}")
+            trade_cols[4].text(f"${trade_size:,.2f}")
             
             # Price
             price = trade.get('price', 0) or 0
-            trade_cols[4].text(f"${price:.2f}")
+            trade_cols[5].text(f"${price:.2f}")
             
             # Name (get from favorites)
             wallet_addr = trade.get('wallet_address', '')
@@ -460,25 +543,18 @@ def main():
                 if fav['wallet_address'] == wallet_addr:
                     wallet_name = fav.get('custom_name', wallet_addr[:8])
                     break
-            trade_cols[5].markdown(f"**{wallet_name}**")
+            trade_cols[6].markdown(f"**{wallet_name}**")
             
-            # User address
-            trade_cols[6].code(wallet_addr[:20] + "..." if len(wallet_addr) > 20 else wallet_addr, language=None)
+            # User address (with tooltip for full address)
+            wallet_display = wallet_addr[:20] + "..." if len(wallet_addr) > 20 else wallet_addr
+            trade_cols[7].markdown(
+                f'<div title="{wallet_addr}"><code>{wallet_display}</code></div>',
+                unsafe_allow_html=True
+            )
             
             # Traded shares
             shares = trade.get('shares', 0) or 0
-            trade_cols[7].text(f"{shares:,.2f}")
-            
-            # Timestamp
-            timestamp_str = trade.get('timestamp', '')
-            if timestamp_str:
-                try:
-                    timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                    trade_cols[8].text(timestamp.strftime('%Y-%m-%d %H:%M:%S'))
-                except:
-                    trade_cols[8].text(timestamp_str)
-            else:
-                trade_cols[8].text("Unknown")
+            trade_cols[8].text(f"{shares:,.2f}")
     
     else:
         st.info("No trades match your current filters. The backend is continuously polling for new trades.")
