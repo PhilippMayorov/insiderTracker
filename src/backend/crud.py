@@ -22,6 +22,11 @@ def get_wallet(db: Session, wallet_address: str) -> Optional[TrackedWallet]:
     return db.query(TrackedWallet).filter(TrackedWallet.wallet_address == wallet_address).first()
 
 
+def get_wallet_by_name(db: Session, custom_name: str) -> Optional[TrackedWallet]:
+    """Get a specific wallet by custom name"""
+    return db.query(TrackedWallet).filter(TrackedWallet.custom_name == custom_name).first()
+
+
 def create_wallet(
     db: Session,
     wallet_address: str,
@@ -102,7 +107,18 @@ def get_trades(
     
     # Apply filters
     if wallet_address:
-        query = query.filter(Trade.wallet_address == wallet_address)
+        # Check if it's a custom name or wallet address
+        # First try to find a wallet with this custom name
+        tracked_wallet = db.query(TrackedWallet).filter(
+            TrackedWallet.custom_name == wallet_address
+        ).first()
+        
+        if tracked_wallet:
+            # It's a custom name, use the actual wallet address
+            query = query.filter(Trade.wallet_address == tracked_wallet.wallet_address)
+        else:
+            # It's a wallet address
+            query = query.filter(Trade.wallet_address == wallet_address)
     
     if side:
         query = query.filter(Trade.side == side.lower())

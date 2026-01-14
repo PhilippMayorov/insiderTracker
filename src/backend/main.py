@@ -276,11 +276,18 @@ def get_trades(
 
 @app.get("/markets", response_model=List[str])
 def get_markets(
-    wallet: Optional[str] = Query(None, description="Filter by wallet address"),
+    wallet: Optional[str] = Query(None, description="Filter by wallet address or custom name"),
     db: Session = Depends(get_db)
 ):
     """Get distinct market names (for filter dropdown)"""
-    markets = crud.get_distinct_markets(db, wallet_address=wallet)
+    # Convert custom name to wallet address if needed
+    wallet_address = wallet
+    if wallet:
+        tracked_wallet = crud.get_wallet_by_name(db, wallet)
+        if tracked_wallet:
+            wallet_address = tracked_wallet.wallet_address
+    
+    markets = crud.get_distinct_markets(db, wallet_address=wallet_address)
     return markets
 
 

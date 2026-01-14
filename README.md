@@ -101,6 +101,14 @@ streamlit run src/frontend/app.py
 API_BASE_URL=http://localhost:8080 streamlit run src/frontend/app.py
 ```
 
+Testing scripts:
+
+To populate test trades:
+
+```bash
+python scripts\add_test_trades.py
+```
+
 ### 5. Access the Application
 
 - **Frontend UI:** http://localhost:8501
