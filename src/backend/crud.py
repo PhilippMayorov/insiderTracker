@@ -199,6 +199,16 @@ def create_trade(db: Session, trade_data: Dict[str, Any]) -> Optional[Trade]:
         usd_amount=trade_data.get("usd_amount"),
         shares=trade_data.get("shares"),
         timestamp=trade_data.get("timestamp"),
+        
+        # Market info fields
+        market_question=trade_data.get("market_question"),
+        market_outcome=trade_data.get("market_outcome"),
+        market_tags=trade_data.get("market_tags"),
+        market_target_price=trade_data.get("market_target_price"),
+        market_resolved=trade_data.get("market_resolved"),
+        market_is_winner=trade_data.get("market_is_winner"),
+        market_resolved_price=trade_data.get("market_resolved_price"),
+        
         raw_json=json.dumps(trade_data.get("raw", {})),
         created_at=datetime.utcnow().isoformat()
     )
@@ -207,6 +217,35 @@ def create_trade(db: Session, trade_data: Dict[str, Any]) -> Optional[Trade]:
     db.commit()
     db.refresh(trade)
     return trade
+
+
+def bulk_create_trades(db: Session, trades_data: List[Dict[str, Any]]) -> Dict[str, int]:
+    """
+    Bulk import trades from a list of trade dictionaries
+    Handles deduplication automatically
+    
+    Args:
+        db: Database session
+        trades_data: List of normalized trade dictionaries
+        
+    Returns:
+        Dictionary with counts: {"imported": X, "skipped": Y, "total": Z}
+    """
+    imported = 0
+    skipped = 0
+    
+    for trade_data in trades_data:
+        result = create_trade(db, trade_data)
+        if result:
+            imported += 1
+        else:
+            skipped += 1
+    
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "total": len(trades_data)
+    }
 
 
 def get_distinct_markets(db: Session, wallet_address: Optional[str] = None) -> List[str]:

@@ -27,12 +27,22 @@ class Trade(Base):
     wallet_address = Column(String, ForeignKey("tracked_wallets.wallet_address"), nullable=False, index=True)
     asset_id = Column(String, nullable=True)
     market_name = Column(String, nullable=True, index=True)
-    side = Column(String, nullable=True)  # buy / sell
+    side = Column(String, nullable=True)  # buy / sell (b / s from Hashdive)
     share_type = Column(String, nullable=True)  # YES / NO
     price = Column(Float, nullable=True)
     usd_amount = Column(Float, nullable=True, index=True)
     shares = Column(Float, nullable=True)
     timestamp = Column(String, nullable=False, index=True)
+    
+    # Market info fields from Hashdive
+    market_question = Column(Text, nullable=True)  # market_info.question
+    market_outcome = Column(String, nullable=True)  # market_info.outcome (Yes/No)
+    market_tags = Column(Text, nullable=True)  # market_info.tags (stored as JSON string)
+    market_target_price = Column(Float, nullable=True)  # market_info.target_price
+    market_resolved = Column(Integer, nullable=True)  # market_info.resolved (0/1)
+    market_is_winner = Column(Integer, nullable=True)  # market_info.is_winner (0/1)
+    market_resolved_price = Column(Float, nullable=True)  # market_info.resolved_price
+    
     raw_json = Column(Text, nullable=True)  # Store full trade data as JSON
     created_at = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
     

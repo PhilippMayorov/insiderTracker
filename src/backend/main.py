@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
 
 from src.backend.db import get_db, init_db
@@ -85,6 +86,14 @@ class HealthResponse(BaseModel):
     database_connected: bool
 
 
+class FetchHistoryResponse(BaseModel):
+    wallet_address: str
+    imported: int
+    skipped: int
+    total: int
+    message: str
+
+
 # ============================================================================
 # FastAPI Application Lifecycle
 # ============================================================================
@@ -154,6 +163,12 @@ app.add_middleware(
 # ============================================================================
 # Wallet Management Endpoints
 # ============================================================================
+# Active Endpoints:
+# - GET    /favorites                                 - List all tracked wallets
+# - POST   /favorites                                 - Add new tracked wallet
+# - PATCH  /favorites/{wallet_address}                - Update wallet details
+# - DELETE /favorites/{wallet_address}                - Remove tracked wallet
+# - POST   /favorites/{wallet_address}/fetch-history  - Fetch trade history from Hashdive
 
 @app.get("/favorites", response_model=List[WalletResponse])
 def get_favorites(
@@ -218,18 +233,86 @@ def delete_favorite(
     db: Session = Depends(get_db)
 ):
     """Remove a tracked wallet"""
-    success = crud.delete_wallet(db, wallet_address)
+    try:
+        success = crud.delete_wallet(db, wallet_address)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Wallet not found")
+        
+        logger.info(f"Deleted wallet: {wallet_address}")
+        return None
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting wallet {wallet_address}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error deleting wallet: {str(e)}")
+
+
+@app.post("/favorites/{wallet_address}/fetch-history", response_model=FetchHistoryResponse)
+def fetch_wallet_trade_history(
+    wallet_address: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch and store all trade history for a specific wallet from Hashdive API
     
-    if not success:
-        raise HTTPException(status_code=404, detail="Wallet not found")
+    This endpoint:
+    1. Checks if wallet is tracked
+    2. Fetches all trades from Hashdive API
+    3. Stores them in the database (deduplicating automatically)
+    4. Returns import statistics
+    """
+    global poller
     
-    logger.info(f"Deleted wallet: {wallet_address}")
-    return None
+    # Check if wallet exists
+    wallet = crud.get_wallet(db, wallet_address)
+    if not wallet:
+        raise HTTPException(status_code=404, detail="Wallet not tracked. Add it first.")
+    
+    # Use the hashdive client from the poller
+    if not poller or not poller.hashdive_client:
+        raise HTTPException(status_code=503, detail="Hashdive client not initialized")
+    
+    hashdive_client = poller.hashdive_client
+    
+    try:
+        # Fetch trades from Hashdive
+        logger.info(f"Fetching trade history for wallet: {wallet_address}")
+        trades = hashdive_client.get_trades(wallet_address)
+        
+        if not trades:
+            return FetchHistoryResponse(
+                wallet_address=wallet_address,
+                imported=0,
+                skipped=0,
+                total=0,
+                message="No trades found for this wallet"
+            )
+        
+        # Bulk import trades
+        result = crud.bulk_create_trades(db, trades)
+        
+        logger.info(f"Imported {result['imported']} trades for wallet {wallet_address}")
+        
+        return FetchHistoryResponse(
+            wallet_address=wallet_address,
+            imported=result["imported"],
+            skipped=result["skipped"],
+            total=result["total"],
+            message=f"Successfully imported {result['imported']} trades ({result['skipped']} duplicates skipped)"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching trade history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch trade history: {str(e)}")
 
 
 # ============================================================================
 # Trades Query Endpoints
 # ============================================================================
+# Active Endpoints:
+# - GET /trades   - Query trades with filters, sorting, and pagination
+# - GET /markets  - Get distinct market names for filter dropdown
 
 @app.get("/trades", response_model=TradesQueryResponse)
 def get_trades(
@@ -251,32 +334,36 @@ def get_trades(
     
     Returns paginated trade results with total count
     """
-    skip = (page - 1) * page_size
-    
-    trades, total_count = crud.get_trades(
-        db=db,
-        wallet_address=wallet,
-        side=side,
-        min_price=min_price,
-        max_price=max_price,
-        min_usd=min_usd,
-        max_usd=max_usd,
-        market=market,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        skip=skip,
-        limit=page_size
-    )
-    
-    total_pages = (total_count + page_size - 1) // page_size
-    
-    return TradesQueryResponse(
-        items=[TradeResponse.from_orm(t) for t in trades],
-        total_results=total_count,
-        total_pages=total_pages,
-        current_page=page,
-        page_size=page_size
-    )
+    try:
+        skip = (page - 1) * page_size
+        
+        trades, total_count = crud.get_trades(
+            db=db,
+            wallet_address=wallet,
+            side=side,
+            min_price=min_price,
+            max_price=max_price,
+            min_usd=min_usd,
+            max_usd=max_usd,
+            market=market,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            skip=skip,
+            limit=page_size
+        )
+        
+        total_pages = (total_count + page_size - 1) // page_size
+        
+        return TradesQueryResponse(
+            items=[TradeResponse.from_orm(t) for t in trades],
+            total_results=total_count,
+            total_pages=total_pages,
+            current_page=page,
+            page_size=page_size
+        )
+    except Exception as e:
+        logger.error(f"Error fetching trades: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching trades: {str(e)}")
 
 
 @app.get("/markets", response_model=List[str])
@@ -285,20 +372,27 @@ def get_markets(
     db: Session = Depends(get_db)
 ):
     """Get distinct market names (for filter dropdown)"""
-    # Convert custom name to wallet address if needed
-    wallet_address = wallet
-    if wallet:
-        tracked_wallet = crud.get_wallet_by_name(db, wallet)
-        if tracked_wallet:
-            wallet_address = tracked_wallet.wallet_address
-    
-    markets = crud.get_distinct_markets(db, wallet_address=wallet_address)
-    return markets
+    try:
+        # Convert custom name to wallet address if needed
+        wallet_address = wallet
+        if wallet:
+            tracked_wallet = crud.get_wallet_by_name(db, wallet)
+            if tracked_wallet:
+                wallet_address = tracked_wallet.wallet_address
+        
+        markets = crud.get_distinct_markets(db, wallet_address=wallet_address)
+        return markets
+    except Exception as e:
+        logger.error(f"Error fetching markets: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching markets: {str(e)}")
 
 
 # ============================================================================
 # System Endpoints
 # ============================================================================
+# Active Endpoints:
+# - GET /health  - Health check and system status
+# - GET /        - Root endpoint with API info
 
 @app.get("/health", response_model=HealthResponse)
 def health_check(db: Session = Depends(get_db)):
@@ -308,7 +402,7 @@ def health_check(db: Session = Depends(get_db)):
     # Test database connection
     db_connected = False
     try:
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db_connected = True
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
@@ -318,21 +412,6 @@ def health_check(db: Session = Depends(get_db)):
         poller_running=poller is not None and poller.running,
         database_connected=db_connected
     )
-
-
-@app.post("/poller/run-once", status_code=202)
-async def trigger_poll():
-    """Manually trigger a polling cycle (dev/testing only)"""
-    global poller
-    
-    if not poller:
-        raise HTTPException(status_code=503, detail="Poller not initialized")
-    
-    # Trigger poll in background
-    import asyncio
-    asyncio.create_task(poller.poll_once())
-    
-    return {"message": "Polling cycle triggered"}
 
 
 @app.get("/")

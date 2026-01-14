@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class HashdiveClient:
     """Client for interacting with the Hashdive (Hashmaps) API"""
     
-    def __init__(self, api_key: Optional[str] = None, base_url: str = "https://api.hashdive.io"):
+    def __init__(self, api_key: Optional[str] = None, base_url: str = "https://hashdive.com"):
         """
         Initialize Hashdive client
         
@@ -26,7 +26,7 @@ class HashdiveClient:
         
         if api_key:
             self.session.headers.update({
-                "Authorization": f"Bearer {api_key}"
+                "x-api-key": api_key
             })
     
     def get_trades(
@@ -34,40 +34,50 @@ class HashdiveClient:
         wallet_address: str,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
-        limit: int = 100
+        limit: int = 1000
     ) -> List[Dict[str, Any]]:
         """
-        Fetch trades for a specific wallet address
+        Fetch trades for a specific wallet address from Hashdive API
         
         Args:
             wallet_address: The PolyMarket wallet address to query
-            start_time: Optional start time for filtering trades
-            end_time: Optional end time for filtering trades
-            limit: Maximum number of trades to return
+            start_time: Optional start time for filtering trades (not used in current API)
+            end_time: Optional end time for filtering trades (not used in current API)
+            limit: Maximum number of trades to return (not strictly enforced by API)
             
         Returns:
-            List of trade dictionaries
+            List of trade dictionaries with normalized fields
         """
         try:
-            endpoint = f"{self.base_url}/get_trades"
+            endpoint = f"{self.base_url}/api/get_trades"
             
             params = {
-                "wallet": wallet_address,
-                "limit": limit
+                "user_address": wallet_address,
+                "format": "json"
             }
             
-            if start_time:
-                params["start_time"] = int(start_time.timestamp())
-            if end_time:
-                params["end_time"] = int(end_time.timestamp())
+            headers = {}
+            if self.api_key:
+                headers["x-api-key"] = self.api_key
             
             logger.debug(f"Fetching trades for wallet {wallet_address}")
             
-            response = self.session.get(endpoint, params=params, timeout=30)
+            response = self.session.get(endpoint, params=params, headers=headers, timeout=30)
             response.raise_for_status()
             
             data = response.json()
-            trades = data.get("trades", [])
+            
+            # Hashdive returns a list of trade dictionaries directly
+            # or may be wrapped in a 'data' field
+            if isinstance(data, list):
+                trades = data
+            elif isinstance(data, dict) and "data" in data:
+                trades = data["data"]
+            elif isinstance(data, dict) and "trades" in data:
+                trades = data["trades"]
+            else:
+                logger.warning(f"Unexpected response format from Hashdive API: {type(data)}")
+                trades = []
             
             # Enrich and normalize trades
             normalized_trades = []
@@ -88,7 +98,23 @@ class HashdiveClient:
     
     def normalize_trade(self, trade: Dict[str, Any], wallet_address: str) -> Dict[str, Any]:
         """
-        Normalize and enrich trade data
+        Normalize and enrich trade data from Hashdive API
+        
+        Hashdive API returns trades with the following structure:
+        - user_address: wallet address
+        - asset_id: asset identifier
+        - side: 'b' (buy) or 's' (sell)
+        - price: price per share
+        - shares: number of shares
+        - usd_amount: USD value of trade
+        - timestamp: trade timestamp (format: 'M/D/YYYY H:MM')
+        - market_info.question: market question
+        - market_info.outcome: 'Yes' or 'No'
+        - market_info.tags: list of tags
+        - market_info.target_price: target price
+        - market_info.resolved: boolean
+        - market_info.is_winner: boolean
+        - market_info.resolved_price: resolved price
         
         Args:
             trade: Raw trade data from Hashdive
@@ -104,17 +130,51 @@ class HashdiveClient:
             # Generate deterministic hash
             trade_uid = self.generate_trade_uid(trade, wallet_address)
         
+        # Extract market_info if present
+        market_info = trade.get("market_info", {})
+        if not isinstance(market_info, dict):
+            market_info = {}
+        
+        # Parse tags (may be a list or string)
+        tags = market_info.get("tags", [])
+        if isinstance(tags, list):
+            tags_json = json.dumps(tags)
+        elif isinstance(tags, str):
+            tags_json = tags
+        else:
+            tags_json = "[]"
+        
+        # Normalize side: 'b' -> 'buy', 's' -> 'sell'
+        side_raw = trade.get("side", "")
+        if side_raw == "b":
+            side = "buy"
+        elif side_raw == "s":
+            side = "sell"
+        else:
+            side = self.normalize_side(side_raw)
+        
         # Extract and normalize fields
         normalized = {
             "trade_uid": trade_uid,
             "wallet_address": wallet_address,
-            "asset_id": trade.get("asset_id") or trade.get("token_id"),
-            "market_name": trade.get("market") or trade.get("market_name"),
-            "side": self.normalize_side(trade.get("side")),
+            "asset_id": str(trade.get("asset_id", "")) if trade.get("asset_id") else None,
+            "market_name": market_info.get("question") or trade.get("market") or trade.get("market_name"),
+            "side": side,
+            "share_type": market_info.get("outcome"),  # 'Yes' or 'No'
             "price": self.safe_float(trade.get("price")),
             "usd_amount": self.safe_float(trade.get("usd_amount") or trade.get("value_usd")),
             "shares": self.safe_float(trade.get("shares") or trade.get("size") or trade.get("amount")),
             "timestamp": self.normalize_timestamp(trade.get("timestamp")),
+            
+            # Market info fields
+            "market_question": market_info.get("question"),
+            "market_outcome": market_info.get("outcome"),
+            "market_tags": tags_json,
+            "market_target_price": self.safe_float(market_info.get("target_price")),
+            "market_resolved": 1 if market_info.get("resolved") else 0,
+            "market_is_winner": 1 if market_info.get("is_winner") else 0,
+            "market_resolved_price": self.safe_float(market_info.get("resolved_price")),
+            
             "raw": trade  # Store full raw data
         }
         
@@ -163,17 +223,67 @@ class HashdiveClient:
     
     @staticmethod
     def normalize_timestamp(timestamp: Any) -> str:
-        """Normalize timestamp to ISO format string"""
+        """
+        Normalize timestamp to ISO format string
+        
+        Handles multiple formats:
+        - Unix timestamp (int)
+        - ISO format string
+        - Hashdive format: "M/D/YYYY H:MM" or "MM/DD/YYYY HH:MM"
+        - datetime object
+        """
         if isinstance(timestamp, int):
             # Unix timestamp
             return datetime.fromtimestamp(timestamp).isoformat()
         elif isinstance(timestamp, str):
-            # Already string, try to parse and reformat
+            # Try to parse Hashdive format: "1/14/2026 17:47"
+            # Windows-compatible: parse manually for single-digit dates
+            try:
+                # Split the timestamp into date and time parts
+                parts = timestamp.split(' ')
+                if len(parts) == 2:
+                    date_part = parts[0]
+                    time_part = parts[1]
+                    
+                    # Parse date: M/D/YYYY or MM/DD/YYYY
+                    date_components = date_part.split('/')
+                    if len(date_components) == 3:
+                        month = int(date_components[0])
+                        day = int(date_components[1])
+                        year = int(date_components[2])
+                        
+                        # Parse time: H:MM or HH:MM or H:MM:SS
+                        time_components = time_part.split(':')
+                        if len(time_components) >= 2:
+                            hour = int(time_components[0])
+                            minute = int(time_components[1])
+                            second = int(time_components[2]) if len(time_components) > 2 else 0
+                            
+                            dt = datetime(year, month, day, hour, minute, second)
+                            return dt.isoformat()
+            except (ValueError, IndexError, AttributeError):
+                pass
+            
+            # Try standard formats as fallback
+            for fmt in [
+                "%m/%d/%Y %H:%M",  # 01/14/2026 17:47
+                "%m/%d/%Y %H:%M:%S",  # 01/14/2026 17:47:30
+            ]:
+                try:
+                    dt = datetime.strptime(timestamp, fmt)
+                    return dt.isoformat()
+                except (ValueError, AttributeError):
+                    continue
+            
+            # Try ISO format
             try:
                 dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                 return dt.isoformat()
             except:
-                return timestamp
+                pass
+            
+            # Return as-is if can't parse
+            return timestamp
         elif isinstance(timestamp, datetime):
             return timestamp.isoformat()
         else:

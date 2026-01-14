@@ -235,7 +235,7 @@ def main():
     
     if favorites:
         # Create table header
-        col1, col2, col3, col4 = st.columns([2, 4, 2, 0.8])
+        col1, col2, col3, col4, col5 = st.columns([2, 4, 2, 0.8, 1.2])
         
         with col1:
             st.markdown("**Custom Name**")
@@ -245,12 +245,14 @@ def main():
             st.markdown("**Main Market Traded**")
         with col4:
             st.markdown("**Actions**")
+        with col5:
+            st.markdown("**Fetch History**")
         
         # Display each trader with edit and delete options
         traders_to_delete = []
         
         for i, fav in enumerate(favorites):
-            col1, col2, col3, col4 = st.columns([2, 4, 2, 0.8])
+            col1, col2, col3, col4, col5 = st.columns([2, 4, 2, 0.8, 1.2])
             
             original_name = fav.get('custom_name', '')
             original_address = fav['wallet_address']
@@ -283,6 +285,16 @@ def main():
             with col4:
                 if st.button("🗑️", key=f"delete_{i}", help="Delete this trader"):
                     traders_to_delete.append(i)
+            
+            with col5:
+                if st.button("📥 Fetch Trades", key=f"fetch_{i}", help="Fetch trade history from Hashdive"):
+                    with st.spinner(f"Fetching trades for {original_name or original_address[:8]}..."):
+                        result = api_post(f"/favorites/{original_address}/fetch-history", {})
+                        if result:
+                            st.success(f"✅ {result.get('message', 'Trades imported successfully')}")
+                            st.info(f"Imported: {result.get('imported', 0)} | Skipped: {result.get('skipped', 0)} | Total: {result.get('total', 0)}")
+                            # Refresh the page to show new trades
+                            st.rerun()
             
             # Check if values changed and update via API
             if (new_name != original_name or 

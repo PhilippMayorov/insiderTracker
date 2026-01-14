@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # Hashdive API
     hashdive_api_key: str = Field(default="", alias="HASHDIVE_API_KEY")
     hashdive_api_url: str = Field(
-        default="https://api.hashdive.io",
+        default="https://hashdive.com",
         alias="HASHDIVE_API_URL"
     )
     
